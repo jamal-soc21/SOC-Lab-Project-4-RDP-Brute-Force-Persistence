@@ -1,88 +1,359 @@
-# 🛡️ Project 4: RDP Brute Force & Persistence Detection Lab
+# 🛡️ Project 4: RDP Brute Force & Scheduled Task Detection Lab
 
-**Author:** Jamal  
-**Role Target:** SOC Analyst Tier 1 / Detection Engineer  
-**Tech Stack:** Wazuh v4.x, Sysmon (Olaf Hartong Modular), Windows 11, Kali Linux, NetExec, MITRE ATT&CK  
-
-## 📖 Executive Summary
-This project simulates a complete RDP attack chain (Brute Force → Account Compromise → Persistence) and validates how each stage is detected — and crucially, where the SIEM stays silent. Unlike standard tutorials that stop at "alert generated," this lab focuses on operational reality: the difference between what is *logged* and what is *alerted*, and how a low-severity persistence event can slip past an analyst focused only on high-severity dashboards.
-
-Key achievements include executing a successful brute force via NetExec, establishing persistence through a scheduled task, and uncovering a **detection gap** where the persistence action was captured by Sysmon but classified at Level 4 (no alert). A conditional elevation rule was then engineered and verified via engine testing (`wazuh-analysisd -t`).
+> **Project Type:** Defensive SOC Lab — Windows Telemetry Collection, Wazuh Rule Tuning, and Manual Incident Investigation  
+> **Status:** Attack Scenario Executed — Custom Rule Syntax Validated — Live Level 10 Detection Pending Verification  
+> **Environment:** Isolated Virtual Lab  
+> **Author:** Jamal  
+> **Role Focus:** SOC Analyst Tier 1 / Detection Engineering
 
 ---
 
-## 🏗️ Architecture & Detection Strategy
+## 📋 Table of Contents
 
-### Dual-Sensor Deployment
-The environment uses two independent sensors to ensure coverage redundancy:
-
-1. **Wazuh Agent (Security Log):** Collects Windows Security events (`4624`, `4625`) in realtime, providing authentication context (source IP, sub-status, logon type).
-2. **Sysmon (Behavioral):** Uses the Olaf Hartong Modular configuration to capture process creation (`Event ID 1`) with full command-line attribution, mapped directly to MITRE ATT&CK techniques.
-
-> 💡 **Design Decision:** Relying solely on the Security Log misses *post-authentication* actions; relying solely on Sysmon generates excessive noise. Combining both allows for high-fidelity correlation where the Security Log confirms *access* and Sysmon provides *behavioral intent*.
-
-### Compliance & Framework Mapping
-All detections are mapped to industry standards to demonstrate business alignment:
-
-- **MITRE ATT&CK:** T1110.001 (Password Guessing), T1021.001 (Remote Services: RDP), T1053.005 (Scheduled Task/Job)
-- **NIST 800-53:** AU-6 (Audit Review), AC-7 (Unsuccessful Logon Attempts)
-- **PCI DSS:** Requirement 8.1.6 (Lockout after failed attempts), 10.2.5 (User authentication events)
-
----
-
-## 🚦 Attack Scenarios & Detection Evidence
-
-### Scenario 1: RDP Brute Force → Compromise
-
-- **Technique:** T1110.001 (Password Guessing) via T1021.001 (RDP)
-- **Action:** Executed `netexec rdp 192.168.1.12 -u BruteTarget -p pw.txt` from Kali, cycling 5 wrong passwords then 1 correct.
-- **Detection:** Wazuh generated a burst of `4625` events (SubStatus `0xC000006A`, Logon Type 10), immediately followed by a single `4624` successful logon from the same source IP.
-- **Evidence:**
-
-![Account Prep](01_account_prep.png)  
-![Password List](02_password_list.png)  
-![NetExec Success](03_netexec_success.png)
-
-### Scenario 2: Scheduled Task Persistence (The Detection Gap)
-
-- **Technique:** T1053.005 (Scheduled Task/Job)
-- **Action:** Inside the RDP session, ran `schtasks /create /tn WinUpdater /tr "cmd.exe /c calc.exe" /sc minute /mo 5 /f`.
-- **Dual-Sensor Validation:**
-  - **Security Log:** The task creation was *not* captured in the default Security channel (Windows logs it under `Microsoft-Windows-TaskScheduler/Operational`, which is **not collected by default**).
-  - **Sysmon EID 1:** Captured `schtasks.exe` execution in realtime with full command-line context, tagged `technique_id=T1053.005`.
-  - **Severity:** Logged at **Level 4** → **no alert generated**. This is the blind spot.
-- **Evidence:**
-
-![Schtasks Success](04_schtasks_success.png)  
-![Evidence Files](05_evidence_files.png)  
-![PCAP Size](06_pcap_size.png)  
-![Local Event 4698 Proof](09_local_event_4698_proof.png)
+1. [Project Overview](#-project-overview)
+2. [Lab Architecture](#-lab-architecture)
+3. [Attack Scenario](#-attack-scenario)
+4. [Scenario 1: RDP Brute-Force and Successful Authentication](#-scenario-1-rdp-brute-force-and-successful-authentication)
+5. [Scenario 2: Scheduled Task Creation](#-scenario-2-scheduled-task-creation)
+6. [Threat Hunting and Evidence Analysis](#-threat-hunting-and-evidence-analysis)
+7. [Custom Wazuh Rule and Detection Tuning](#-custom-wazuh-rule-and-detection-tuning)
+8. [Archives vs. Alerts](#-archives-vs-alerts)
+9. [Investigation Findings](#-investigation-findings)
+10. [MITRE ATT&CK Mapping](#-mitre-attck-mapping)
+11. [Limitations and Validation Gaps](#-limitations-and-validation-gaps)
+12. [Next Steps](#-next-steps)
+13. [References](#-references)
 
 ---
 
-## 🔍 Threat Hunting Methodology
+## 🔍 Project Overview
 
-Instead of passive waiting, active hunting was performed across **both** the alerting and archive layers:
+This project investigates a simulated RDP-based intrusion scenario in an isolated virtual environment using **Wazuh**, **Windows Security Event Logs**, and **Sysmon**.
 
-1. **Broad Sweep:** Queried `data.win.system.eventID:4625 AND data.win.eventdata.targetUserName:BruteTarget` → Isolated the brute-force burst.
-2. **Correlation:** Pivoted to `eventID:4624` for the same account → Confirmed a single successful RDP logon (Logon Type 10) from `192.168.1.13`.
-3. **Pivot to Archives:** Searched `WinUpdater` in `wazuh-archives*` (not Security Events) → Found the Sysmon `Event ID 1` for `schtasks.exe` at **Level 4**.
-4. **Gap Confirmation:** The same query in **Security Events** returned **0 alerts**, proving the action was visible but silent.
+The lab covers two related activities:
 
-> ⚠️ **Critical Lesson:** Absence of an alert does **not** prove absence of activity. The archive layer (`wazuh-archives*`) must always be queried during hunting, because low-severity or uncollected events live there, not in the alert dashboard.
+1. Simulating repeated RDP authentication failures followed by a successful login.
+2. Creating a scheduled task inside the remote Windows session to simulate a persistence-related behavior.
+
+The main focus is not simply generating alerts. It is understanding how different telemetry sources provide visibility into authentication and process execution, how Wazuh evaluates collected events, and how custom rules can be used to tune detection behavior.
+
+### Project Objectives
+
+- Collect Windows Security authentication events through the Wazuh Agent.
+- Collect Sysmon process-creation telemetry.
+- Investigate failed and successful RDP authentication.
+- Examine scheduled task creation activity.
+- Search both Wazuh alert data and archived event data.
+- Create a conditional custom rule for scheduled-task process execution.
+- Validate custom rule syntax.
+- Identify what has been demonstrated and what still requires operational testing.
+
+> **Scope and evidence note:** This is a controlled educational lab. The project documents the observed results and the current validation status. It does not claim production readiness, complete attack-chain detection, or successful automated incident response.
 
 ---
 
-## 🧪 Secure Tuning & Engineering Discipline
+## 🏗️ Lab Architecture
 
-A common anti-pattern is ignoring low-severity events. This creates security gaps. In this project, we implemented **Conditional Elevation**:
+The environment contains three virtual machines.
 
-- **Problem:** `schtasks.exe` persistence was logged by Sysmon at Level 4, producing no alert.
-- **Solution:** Created child rule `100001` (`level=10`) that triggers ONLY when the process image is `schtasks.exe` **and** the MITRE rule name is `T1053.005`.
-- **Validation:** Verified syntax via `wazuh-analysisd -t` before deployment.
-- **Integrity Check:** Confirmed general Sysmon EID 1 detection remained active for all other processes, proving the engine was surgically tuned, not disabled.
+```text
+┌────────────────────────┐
+│      Kali Linux        │
+│      Attacker VM       │
+│      192.168.1.13      │
+└───────────┬────────────┘
+            │
+            │ RDP / TCP 3389
+            ▼
+┌────────────────────────┐
+│      Windows 11        │
+│      Victim VM         │
+│      192.168.1.12      │
+│                        │
+│      Wazuh Agent       │
+│      Sysmon            │
+└───────────┬────────────┘
+            │
+            │ Windows Security Logs
+            │ Sysmon Operational Logs
+            ▼
+┌────────────────────────┐
+│     Ubuntu Server      │
+│     Wazuh Manager      │
+│     Wazuh Indexer      │
+│     Wazuh Dashboard    │
+└────────────────────────┘
+```
 
-**Code Snippet (Rule 100001):**
+### Components
+
+| Component | Role | Purpose |
+|---|---|---|
+| Kali Linux | Attacker VM | Generates controlled RDP authentication attempts. |
+| Windows 11 | Victim VM | Receives RDP connections and generates endpoint telemetry. |
+| Wazuh Agent | Endpoint Collector | Forwards configured Windows event sources to Wazuh. |
+| Sysmon | Endpoint Telemetry | Records process creation and related process metadata. |
+| Ubuntu Server | Wazuh Manager | Receives, decodes, and evaluates collected events. |
+| Wazuh Dashboard | Investigation Interface | Supports searching and reviewing security telemetry. |
+
+### Relevant Lab Details
+
+| Item | Value |
+|---|---|
+| Attacker IP | `192.168.1.13` |
+| Victim IP | `192.168.1.12` |
+| Target Account | `BruteTarget` |
+| Scheduled Task Name | `WinUpdater` |
+| Remote Service | RDP — TCP 3389 |
+
+---
+
+## ⚔️ Attack Scenario
+
+The lab simulates two activities from the same controlled test environment.
+
+### Scenario 1 — RDP Brute Force and Successful Authentication
+
+The attacker used NetExec to perform RDP authentication attempts against the Windows endpoint.
+
+Command used:
+
+```bash
+netexec rdp 192.168.1.12 -u BruteTarget -p pw.txt
+```
+
+The test password list contained five incorrect passwords followed by one correct password.
+
+The observed activity included:
+
+- Multiple failed authentication attempts.
+- A successful authentication using the test account.
+- Windows Security events associated with the authentication attempts.
+
+**Evidence:**
+
+![Account Preparation](01_account_prep.png)
+
+![Password List](02_password_list.png)
+
+![NetExec Result](03_netexec_success.png)
+
+---
+
+## 🔐 Scenario 1: RDP Brute-Force and Successful Authentication
+
+### Failed Authentication — Event ID 4625
+
+Windows Security Event ID `4625` records a failed logon attempt.
+
+The collected evidence showed multiple failed authentication events associated with the test account.
+
+Relevant fields for investigation include:
+
+- `TargetUserName`
+- `IpAddress`
+- `LogonType`
+- `SubStatus`
+- `TimeCreated`
+
+The observed SubStatus was:
+
+```text
+0xC000006A
+```
+
+This status is associated with an incorrect password for an existing account.
+
+The observed Logon Type was `10`, corresponding to RemoteInteractive logon activity.
+
+### Successful Authentication — Event ID 4624
+
+Windows Security Event ID `4624` records a successful logon.
+
+The investigation identified a successful logon with:
+
+```text
+Logon Type: 10
+```
+
+Logon Type 10 is associated with RemoteInteractive sessions, including Remote Desktop connections.
+
+The successful event was reviewed alongside the preceding failed authentication events and the source address.
+
+**Evidence:**
+
+![Wazuh Failed Logons](07_wazuh_4625_failed.png)
+
+![Wazuh Successful Logon](08_wazuh_4624_success.png)
+
+### Investigation Interpretation
+
+The sequence of failed authentication attempts followed by a successful RDP login is consistent with the simulated password-guessing scenario.
+
+The events provide authentication evidence, but the interpretation depends on their context, including the account, source address, timestamps, and logon type.
+
+---
+
+## 🗓️ Scenario 2: Scheduled Task Creation
+
+After establishing the RDP session, the test account was used to create a scheduled task.
+
+Command executed inside the Windows session:
+
+```cmd
+schtasks /create /tn WinUpdater /tr "cmd.exe /c calc.exe" /sc minute /mo 5 /f
+```
+
+The task was named:
+
+```text
+WinUpdater
+```
+
+The configured action was:
+
+```text
+cmd.exe /c calc.exe
+```
+
+The task was created to simulate a scheduled-task persistence mechanism and generate process-execution telemetry.
+
+### MITRE ATT&CK Context
+
+The behavior is associated with:
+
+`T1053.005 — Scheduled Task/Job: Scheduled Task`
+
+This mapping describes the simulated behavior. It does not, by itself, establish that the activity represents a real-world compromise.
+
+### Local Windows Evidence
+
+The repository includes local Windows evidence associated with scheduled task creation:
+
+![Scheduled Task Creation](04_schtasks_success.png)
+
+![Collected Evidence Files](05_evidence_files.png)
+
+![PCAP File Information](06_pcap_size.png)
+
+![Local Scheduled Task Event Evidence](09_local_event_4698_proof.png)
+
+**Event Channel Note:**
+
+Windows Security Event ID `4698` is the event associated with a scheduled task being created. It belongs to the Windows Security channel and is provided by the `Microsoft-Windows-Security-Auditing` provider.
+
+It must not be confused with events from:
+
+`Microsoft-Windows-TaskScheduler/Operational`
+
+The Task Scheduler Operational channel contains separate task lifecycle events.
+
+The local evidence image should be interpreted according to the actual channel and event details displayed in the original Windows record. The presence of a local Windows event does not establish that the same event was forwarded to Wazuh.
+
+### Sysmon Process-Creation Evidence
+
+Sysmon Event ID `1` records process creation.
+
+The collected telemetry was used to identify the execution of:
+
+```text
+schtasks.exe
+```
+
+Relevant Sysmon fields include:
+
+- `Image`
+- `CommandLine`
+- `ParentImage`
+- `ParentCommandLine`
+- `ProcessGuid`
+- `ParentProcessGuid`
+- `UtcTime`
+
+This provides process-execution context for investigating the scheduled task creation activity.
+
+The process event supports investigation of the command execution. It should not be treated as independent proof of every subsequent action performed by the scheduled task.
+
+---
+
+## 🔎 Threat Hunting and Evidence Analysis
+
+The investigation used both alert-oriented searches and archived event searches.
+
+### 1. Authentication Activity Search
+
+A broad search was performed for failed authentication events associated with the test account.
+
+Example query:
+
+```text
+data.win.system.eventID:4625 AND data.win.eventdata.targetUserName:BruteTarget
+```
+
+The purpose was to isolate the failed authentication activity.
+
+### 2. Successful Authentication Pivot
+
+The investigation then pivoted to Event ID `4624` for the same account.
+
+The successful RDP event was reviewed for:
+
+- Account identity.
+- Source IP address.
+- Logon Type.
+- Timestamp.
+
+The observed successful logon was associated with the attacker address:
+
+```text
+192.168.1.13
+```
+
+### 3. Pivot to Archived Events
+
+The investigation searched for the scheduled task name:
+
+```text
+WinUpdater
+```
+
+within the Wazuh Archives data view:
+
+```text
+wazuh-archives*
+```
+
+The search identified Sysmon Event ID `1` telemetry associated with `schtasks.exe`, shown in the repository evidence at Level 4.
+
+**Evidence:**
+
+![Wazuh Archives WinUpdater](10_wazuh_archives_winupdater.png)
+
+### 4. Review of Security Events
+
+A corresponding search in the Security Events view did not return a matching result for the searched activity.
+
+This observation motivated further investigation into the difference between the archived event and the alert view.
+
+**Important:** A zero-result search in a particular dashboard view does not, by itself, prove that no alert was generated anywhere in Wazuh. The underlying alert data, query filters, index selection, and time range must also be checked.
+
+---
+
+## 🧪 Custom Wazuh Rule and Detection Tuning
+
+The project explored conditional elevation of a specific Sysmon process-creation event.
+
+### Detection Gap Under Investigation
+
+The scheduled task creation command was visible through Sysmon process-creation telemetry.
+
+The observed event was associated with the general Sysmon Event ID `1` rule at Level `4`.
+
+The objective was to distinguish this specific process execution from ordinary process-creation activity and apply a more specific rule.
+
+### Custom Rule 100001
+
+The following child rule was created:
 
 ```xml
 <rule id="100001" level="10">
@@ -93,45 +364,205 @@ A common anti-pattern is ignoring low-severity events. This creates security gap
 </rule>
 ```
 
-**Evidence:**
+### Rule Logic
 
-![Wazuh Archives WinUpdater - Level 4](10_wazuh_archives_winupdater.png)
+| Condition | Purpose |
+|---|---|
+| `<if_sid>81000</if_sid>` | Requires the parent Sysmon process-creation rule to match. |
+| `data.win.eventdata.image` | Restricts the match to the `schtasks.exe` process image. |
+| `data.win.eventdata.ruleName` | Requires the associated MITRE rule name `T1053.005`. |
+| `level="10"` | Assigns Level 10 if the child rule matches. |
+
+The rule is intended to elevate the specific scheduled-task-related process event rather than changing the severity of all Sysmon process-creation events.
+
+### Syntax Validation
+
+The Wazuh rule configuration was checked using:
+
+```bash
+sudo /var/ossec/bin/wazuh-analysisd -t
+```
+
+The reported result was:
+
+```text
+No syntax errors reported.
+```
+
+This confirms that the rule configuration passed the syntax validation performed by the Wazuh analysis engine.
+
+### What Has and Has Not Been Proven
+
+**Demonstrated:**
+
+- The custom rule was written.
+- The rule contains conditions for the parent rule, process image, and MITRE rule name.
+- The Wazuh syntax validation command reported no syntax errors.
+
+**Not yet demonstrated by the currently documented evidence:**
+
+- That the live scheduled-task event matched custom rule `100001`.
+- That the resulting alert contained `rule.id = 100001`.
+- That the resulting alert contained `rule.level = 10`.
+- That benign `schtasks.exe` executions were correctly distinguished from suspicious ones.
+
+Therefore, this project documents the rule as **created and syntax-validated**, not as a fully operationally verified detection.
 
 ---
 
-## 📸 Evidence Gallery
+## ⚖️ Archives vs. Alerts
 
-| Phase | Image | Description |
-| :--- | :--- | :--- |
-| **Setup** | `01_account_prep` | Test account `BruteTarget` prepared |
-| **Setup** | `02_password_list` | Brute-force wordlist |
-| **Attack** | `03_netexec_success` | Successful brute force (Pwn3d!) |
-| **Attack** | `04_schtasks_success` | Persistence task created |
-| **Forensics** | `05_evidence_files` | Collected EVTX + XML evidence |
-| **Forensics** | `06_pcap_size` | Network capture (tcpdump) |
-| **Detection** | `07_wazuh_4625_failed` | Failed logon burst in Wazuh |
-| **Detection** | `08_wazuh_4624_success` | Successful RDP logon in Wazuh |
-| **Gap** | `09_local_event_4698_proof` | Local Windows proof of task creation |
-| **Gap** | `10_wazuh_archives_winupdater` | Persistence logged at Level 4 (no alert) |
+A key investigation lesson from this project is the need to distinguish archived event data from generated security alerts.
+
+| Concept | Wazuh Location / Component | Purpose |
+|---|---|---|
+| Archived Events | `wazuh-archives*` | Stores collected event data when archival is enabled and configured. |
+| Rule Evaluation | Wazuh Analysis Engine | Evaluates decoded events against the loaded ruleset. |
+| Generated Alerts | `wazuh-alerts*` / `alerts.json` | Contains events that produced alerts according to matching rules and alert-generation settings. |
+| Alert Severity | `rule.level` | Indicates the level assigned to the matching rule. |
+
+### Important Wazuh Level 4 Clarification
+
+Wazuh rule levels range from `0` to `16`.
+
+In the default Wazuh configuration, the alert threshold is generally Level `3` (`log_alert_level`).
+
+Therefore, a Level `4` event can generate an alert. Level 4 does **not** inherently mean that no alert exists.
+
+If an event appears in Archives but is not visible in a particular Security Events view, possible explanations include:
+
+- The event did not match an alert-generating rule.
+- The event was processed by a different rule than expected.
+- The dashboard query or time filter excluded the alert.
+- The relevant alert index was not included in the search.
+- Alert-generation settings differ from the default configuration.
+
+The correct investigation method is to inspect the actual alert record and its rule metadata rather than infer alert absence from the rule level or a single dashboard search.
+
+### Key Takeaway
+
+**Event collection, rule matching, alert generation, and dashboard visibility are separate things that must be validated independently.**
+
+An archived event is useful investigation evidence, but its presence alone does not establish whether a corresponding alert was generated.
 
 ---
 
-## 🗣️ Key Takeaways for Interviews
+## 🎯 MITRE ATT&CK Mapping
 
-✅ **"I hunt across both the alerting and archive layers."**  
-*(Reference how the persistence event was found in `wazuh-archives*` while absent from Security Events)*
+The following techniques describe the behaviors simulated in this lab.
 
-✅ **"I treat low-severity logs as data, not noise."**  
-*(Contrast the rejected 'ignore Level 4' vs adopted 'conditional elevation to Level 10')*
+| Observed Behavior | Telemetry | MITRE Tactic | MITRE Technique |
+|---|---|---|---|
+| Password Guessing | Windows Security Event ID `4625` | Credential Access | `T1110.001` — Password Guessing |
+| RDP Authentication | Windows Security Event IDs `4624` and `4625` | Lateral Movement | `T1021.001` — Remote Desktop Protocol |
+| Scheduled Task Creation | Windows task-related evidence and Sysmon process telemetry | Persistence | `T1053.005` — Scheduled Task |
 
-✅ **"I validate detections against the real attack chain, not just single events."**  
-*(Demonstrate correlating 4625 → 4624 → Sysmon EID 1 as one narrative)*
-
-✅ **"I map every detection to MITRE ATT&CK for business context."**  
-*(Show T1110.001 / T1021.001 / T1053.005 linkage)*
+**Mapping qualification:** Event IDs provide supporting telemetry. ATT&CK mapping should be based on the behavior demonstrated by the evidence, not on an event ID alone.
 
 ---
 
-*Built with integrity. Validated through adversity. Operationally proven.*
+## 🚧 Limitations and Validation Gaps
 
-> ⚙️ **Engineering Note:** Windows logs scheduled-task creation under `Microsoft-Windows-TaskScheduler/Operational` (Event ID 4698), which the Wazuh agent does **not** collect by default. To close this gap at the source, add `<location>Microsoft-Windows-TaskScheduler/Operational</location>` to the agent's `<windows>` log collection block in `ossec.conf`, and correlate it with Sysmon EID 1 via the `ProcessGuid` field to attribute the task to its parent process and command line.
+The project was performed in an isolated lab and has the following limitations:
+
+| Area | Current Limitation |
+|---|---|
+| Live Custom Rule Validation | Syntax validation was completed, but a matching Level 10 alert from rule `100001` has not yet been documented. |
+| Alert Visibility | The Archives and Security Events search results need to be reconciled against the underlying alert records and query settings. |
+| False-Positive Testing | Benign scheduled task creation and legitimate administrative process execution have not been tested systematically. |
+| Automated Correlation | The investigation was performed manually. No automated rule chain linking the authentication and scheduled-task events was implemented. |
+| Active Response | Wazuh Active Response was not configured to block the attacker IP. |
+| Distributed Attacker Testing | The scenario used one attacker IP and did not test rotating or distributed sources. |
+| Additional Telemetry | DNS, firewall, proxy, and other network telemetry were not integrated into this scenario. |
+| Persistence Verification | The project simulated scheduled task creation; it does not establish long-term persistence effectiveness or survival across all system states. |
+
+These limitations define the scope of the current lab and provide clear targets for future testing.
+
+---
+
+## 🚀 Next Steps
+
+The following improvements are planned:
+
+### 1. Verify Custom Rule Matching
+
+- Trigger the scheduled task creation scenario again in the isolated lab when practical.
+- Confirm that the parent rule `81000` matches the Sysmon event.
+- Inspect the resulting alert record.
+- Verify `rule.id = 100001` and `rule.level = 10`.
+- Capture the resulting evidence if the rule matches successfully.
+
+### 2. Reconcile Archives and Alerts
+
+- Inspect the same event in the archive data.
+- Search the corresponding alert data.
+- Confirm the time range, index, and query filters.
+- Document why an event is or is not visible in the expected view.
+
+### 3. Test Benign Activity
+
+- Create a legitimate scheduled task.
+- Compare its Sysmon process metadata with the simulated test.
+- Evaluate whether the custom rule is sufficiently specific.
+- Adjust the detection logic only when testing supports the change.
+
+### 4. Explore Automated Correlation
+
+Investigate whether Wazuh correlation mechanisms can combine related authentication and endpoint events.
+
+Potential components include:
+
+- `<if_matched_sid>`
+- `frequency`
+- `timeframe`
+- Same-field correlation conditions.
+
+Any automated correlation should be tested with controlled events before being described as implemented.
+
+### 5. Expand Telemetry
+
+Potential future integrations include:
+
+- Windows Defender logs.
+- PowerShell Script Block Logging.
+- DNS telemetry.
+- Firewall events.
+- Network monitoring sources.
+
+### 6. Evaluate Active Response
+
+Test Wazuh Active Response in the isolated lab and verify the actual response action before documenting it as successful containment.
+
+---
+
+## 📚 References
+
+- [Wazuh Documentation — Rules and Decoders](https://documentation.wazuh.com/current/user-manual/ruleset/index.html)
+- [Wazuh Documentation — Custom Rules](https://documentation.wazuh.com/current/user-manual/ruleset/rules/custom.html)
+- [Wazuh Documentation — Rules Classification](https://documentation.wazuh.com/current/user-manual/ruleset/rules-classification.html)
+- [Wazuh Documentation — Rules XML Syntax](https://documentation.wazuh.com/current/user-manual/ruleset/ruleset-xml-syntax/rules.html)
+- [MITRE ATT&CK](https://attack.mitre.org/)
+- [Microsoft — Windows Security Auditing](https://learn.microsoft.com/en-us/windows/security/threat-protection/auditing/)
+- [Microsoft Sysinternals — Sysmon](https://learn.microsoft.com/en-us/sysinternals/downloads/sysmon)
+- [NetExec Documentation](https://www.netexec.wiki/)
+
+---
+
+## 📝 Final Note
+
+This project demonstrates practical SOC investigation activities in an isolated environment:
+
+- Simulating RDP authentication attempts.
+- Reviewing Windows Security authentication events.
+- Collecting Sysmon process-creation telemetry.
+- Investigating scheduled task creation.
+- Searching archived events and alert data.
+- Creating and syntax-validating a conditional Wazuh rule.
+
+The project also highlights an important detection-engineering principle: **a rule that passes syntax validation is not automatically a rule that has been proven to detect the intended activity.**
+
+The next validation step is to confirm the actual matching alert and compare it with the original event evidence.
+
+The goal is to build detections that are testable, explainable, and supported by observable evidence.
+
+**Built with discipline. Documented with integrity.**
