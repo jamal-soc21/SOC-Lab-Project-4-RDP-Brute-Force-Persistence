@@ -9,20 +9,19 @@
 ---
 
 ## 📋 Table of Contents
-
-1. [Project Overview](#-project-overview)
-2. [Lab Architecture](#-lab-architecture)
-3. [Attack Scenario](#-attack-scenario)
-4. [Scenario 1: RDP Brute-Force and Successful Authentication](#-scenario-1-rdp-brute-force-and-successful-authentication)
-5. [Scenario 2: Scheduled Task Creation](#-scenario-2-scheduled-task-creation)
-6. [Threat Hunting and Evidence Analysis](#-threat-hunting-and-evidence-analysis)
-7. [Custom Wazuh Rule and Detection Tuning](#-custom-wazuh-rule-and-detection-tuning)
-8. [Archives vs. Alerts](#-archives-vs-alerts)
-9. [Investigation Findings](#-investigation-findings)
-10. [MITRE ATT&CK Mapping](#-mitre-attck-mapping)
-11. [Limitations and Validation Gaps](#-limitations-and-validation-gaps)
-12. [Next Steps](#-next-steps)
-13. [References](#-references)
+- [Project Overview](#project-overview)
+- [Lab Architecture](#lab-architecture)
+- [Attack Scenario](#attack-scenario)
+- [Scenario 1: RDP Brute-Force and Successful Authentication](#scenario-1-rdp-brute-force-and-successful-authentication)
+- [Scenario 2: Scheduled Task Creation](#scenario-2-scheduled-task-creation)
+- [Threat Hunting and Evidence Analysis](#threat-hunting-and-evidence-analysis)
+- [Custom Wazuh Rule and Detection Tuning](#custom-wazuh-rule-and-detection-tuning)
+- [Archives vs. Alerts](#archives-vs-alerts)
+- [Investigation Findings](#investigation-findings)
+- [MITRE ATT&CK Mapping](#mitre-attck-mapping)
+- [Limitations and Validation Gaps](#limitations-and-validation-gaps)
+- [Next Steps](#next-steps)
+- [References](#references)
 
 ---
 
