@@ -8,18 +8,18 @@
 
 ---
 ## 📋 Table of Contents
-- [Project Overview](#project-overview)
-- [Lab Architecture](#lab-architecture)
-- [Attack Scenario](#attack-scenario)
-- [Scenario 1: RDP Brute-Force](#scenario-1-rdp-brute-force-and-successful-authentication)
-- [Scenario 2: Scheduled Task Creation](#scenario-2-scheduled-task-creation)
-- [Threat Hunting and Evidence Analysis](#threat-hunting-and-evidence-analysis)
-- [Custom Wazuh Rule and Detection Tuning](#custom-wazuh-rule-and-detection-tuning)
-- [Archives vs. Alerts](#archives-vs-alerts-understanding-the-detection-gap)
-- [MITRE ATT&CK Mapping](#mitre-attck-mapping)
-- [Limitations and Validation Gaps](#limitations-and-validation-gaps)
-- [Next Steps](#next-steps)
-- [References](#references)
+- [Project Overview](#-project-overview)
+- [Lab Architecture](#-lab-architecture)
+- [Attack Scenario](#-attack-scenario)
+- [Scenario 1: RDP Brute-Force](#-scenario-1-rdp-brute-force-and-successful-authentication)
+- [Scenario 2: Scheduled Task Creation](#-scenario-2-scheduled-task-creation)
+- [Threat Hunting and Evidence Analysis](#-threat-hunting-and-evidence-analysis)
+- [Custom Wazuh Rule and Detection Tuning](#-custom-wazuh-rule-and-detection-tuning)
+- [Archives vs. Alerts](#-archives-vs-alerts-understanding-the-detection-gap)
+- [MITRE ATT&CK Mapping](#-mitre-attck-mapping)
+- [Limitations and Validation Gaps](#-limitations-and-validation-gaps)
+- [Next Steps](#-next-steps)
+- [References](#-references)
 ---
 
 ## 🔍 Project Overview
