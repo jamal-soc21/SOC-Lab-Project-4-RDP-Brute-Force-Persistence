@@ -7,12 +7,11 @@
 > **Role Focus:** SOC Analyst Tier 1 / Detection Engineering
 
 ---
-
 ## 📋 Table of Contents
 - [Project Overview](#project-overview)
 - [Lab Architecture](#lab-architecture)
 - [Attack Scenario](#attack-scenario)
-- [Scenario 1: RDP Brute-Force and Successful Authentication](#scenario-1-rdp-brute-force-and-successful-authentication)
+- [Scenario 1: RDP Brute-Force](#scenario-1-rdp-brute-force)
 - [Scenario 2: Scheduled Task Creation](#scenario-2-scheduled-task-creation)
 - [Threat Hunting and Evidence Analysis](#threat-hunting-and-evidence-analysis)
 - [Custom Wazuh Rule and Detection Tuning](#custom-wazuh-rule-and-detection-tuning)
