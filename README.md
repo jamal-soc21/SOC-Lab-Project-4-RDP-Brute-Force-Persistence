@@ -410,16 +410,23 @@ Therefore, this project documents the rule as **created and syntax-validated**, 
 
 ---
 
-## ⚖️ Archives vs. Alerts
+## ⚖️ Archives vs. Alerts: Understanding the Detection Gap
 
-A key investigation lesson from this project is the need to distinguish archived event data from generated security alerts.
+A key investigation lesson from this project is the critical need to distinguish between collected event data and generated security alerts. 
 
 | Concept | Wazuh Location / Component | Purpose |
 |---|---|---|
-| Archived Events | `wazuh-archives*` | Stores collected event data when archival is enabled and configured. |
-| Rule Evaluation | Wazuh Analysis Engine | Evaluates decoded events against the loaded ruleset. |
-| Generated Alerts | `wazuh-alerts*` / `alerts.json` | Contains events that produced alerts according to matching rules and alert-generation settings. |
-| Alert Severity | `rule.level` | Indicates the level assigned to the matching rule. |
+| **Archived Events** | `wazuh-archives*` | Stores raw, collected event data from agents when archival is enabled. |
+| **Rule Evaluation** | Wazuh Analysis Engine | Evaluates decoded events against the loaded ruleset to find matches. |
+| **Generated Alerts** | `wazuh-alerts*` / `alerts.json` | Contains *only* the events that triggered an alert based on matching rules. |
+| **Alert Severity** | `rule.level` | Indicates the risk level (0-15) assigned to the matching rule. |
+
+### 💡 Practical Takeaway from this Lab:
+During the investigation of the persistence mechanism (`schtasks.exe`), we observed a classic **Detection Gap (Blind Spot)**:
+1. The malicious process creation (Sysmon Event ID 1) was successfully collected and is visible in the `wazuh-archives*`.
+2. However, **no alert was generated** in `wazuh-alerts*`. 
+3. **The Root Cause:** Wazuh operates on rule-matching. While it collected the log, it lacks a specific default rule to detect this exact malicious pattern (`schtasks.exe` executing a hidden `cmd.exe` payload). 
+4. **The Solution:** This highlights the necessity of proactive **Threat Hunting** in archives to discover blind spots, followed by engineering **Custom Wazuh Rules** to close the gap and ensure future automated detection.
 
 ### Important Wazuh Level 4 Clarification
 
